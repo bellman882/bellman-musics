@@ -1,0 +1,1061 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>랜덤 유튜브 재생기 (곡명 필터링 + 즐겨찾기 + 재생횟수)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--bg:#f7f9fb;--card:#ffffff;--accent:#ff4d4f;--muted:#6b7280;}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,'Noto Sans KR',Arial;background:var(--bg);margin:0;padding:28px;color:#111}
+.container{max-width:980px;margin:0 auto}
+.header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
+h1{font-size:20px;margin:0}
+.controls{display:flex;gap:8px;align-items:center}
+input[type=text]{padding:10px 12px;border-radius:8px;border:1px solid #e6e9ef;width:360px;font-size:15px}
+button{padding:10px 14px;border-radius:8px;border:0;background:var(--accent);color:white;font-weight:600;cursor:pointer}
+.small{background:transparent;color:var(--accent);border:1px solid var(--accent);font-weight:600}
+.card{background:var(--card);border-radius:12px;box-shadow:0 6px 18px rgba(15,23,42,0.06);padding:16px}
+.meta{color:var(--muted);font-size:13px;margin-top:6px}
+.list{margin-top:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+
+.item{
+  padding:12px;
+  border-radius:12px;
+  background:#fff;
+  border:1px solid #f1f3f7;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  position:relative;
+}
+
+.item:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 10px 24px rgba(0,0,0,0.12);
+}
+
+/* 썸네일 */
+.thumb-box {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 10px;
+  position:relative;
+}
+
+.thumb-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.32);
+  transition: transform 0.35s ease;
+}
+
+.item:hover .thumb-box img {
+  transform: scale(1.42);
+}
+
+/* ▶ 재생 아이콘 */
+.play-icon{
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%, -50%);
+  font-size:54px;
+  color:white;
+  opacity:0;
+  pointer-events:none;
+  transition:opacity 0.25s ease;
+  text-shadow:0 4px 10px rgba(0,0,0,0.35);
+}
+.item:hover .play-icon {
+  opacity:1;
+}
+
+/* 제목 */
+.song-title{
+  font-size:15px;
+  font-weight:600;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.song-title::before{
+  content:"🎵 ";
+}
+
+/* ⭐ 즐겨찾기 */
+.favorite-btn{
+  position:absolute;
+  top:8px;
+  right:10px;
+  font-size:24px;
+  cursor:pointer;
+  color:#ddd;
+  transition:all 0.25s ease;
+  user-select:none;
+  z-index:20;
+}
+.favorite-btn:hover {
+  transform: scale(1.25);
+}
+.favorite-btn.active{
+  color:#ffd600;
+  text-shadow:0 0 6px rgba(0,0,0,0.16);
+}
+
+.footer{margin-top:16px;color:var(--muted);font-size:13px}
+
+mark{
+  background:#ffe066;
+  color:#111;
+  padding:0 3px;
+  border-radius:4px;
+}
+.logo img {
+  height: 60px;          /* 필요 시 40~60px 조절 */
+  display: block;
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="container">
+  <div class="header">
+    <h1 class="logo">
+  <img src="Bellman-노래반주.png" alt="벨만뮤직룸">
+</h1>
+    <div class="controls">
+      <input id="q" type="text" placeholder="곡명(키워드) 입력 후 Enter">
+      <button id="rand">랜덤 재생</button>
+      <button id="playAll" class="small">선택 재생</button>
+      <button id="selectAll" class="small">전체선택</button>
+      <button id="randFiltered" class="small">필터 랜덤재생</button>
+      <button id="seqFiltered" class="small">필터 순차재생</button>
+      <button id="showFav" class="small">⭐ 즐겨찾기만</button>
+      <button id="showAll" class="small">전체보기</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="meta">
+      총 링크: <span id="total">0</span>
+      / 필터링된: <span id="count">0</span>
+      / 즐겨찾기: <span id="favCount">0</span>
+    </div>
+
+    <div class="list" id="list"></div>
+
+    <div class="footer">
+      • 제목 또는 키워드로 필터링  
+      • 즐겨찾기/재생횟수는 자동 저장(localStorage)
+    </div>
+  </div>
+</div>
+
+<script>
+const listEl = document.getElementById('list');
+const totalEl = document.getElementById('total');
+const countEl = document.getElementById('count');
+const qEl = document.getElementById('q');
+
+/* ----------------------------
+    기본 데이터
+----------------------------- */
+const items = [
+  {"title":"10분 내로-김연자(Ab)","url":"https://www.youtube.com/watch?v=W470kHasQK8"},
+  {"title":"5호선 여인-류지광(A)","url":"https://www.youtube.com/watch?v=dQhJ-manutQ"},
+  {"title":"가가라 삼팔선-남인수(Cm)","url":"https://www.youtube.com/watch?v=g_v2xnwo0O4"},
+  {"title":"가격표도 없는 인생-황진영(C)","url":"https://www.youtube.com/watch?v=ms_MBgtnSgw"},
+  {"title":"가는 세월-서유석(F)","url":"https://www.youtube.com/watch?v=cd1vutoixw0"},
+  {"title":"가슴아프게(Disko) - 남진(Dm)","url":"https://www.youtube.com/watch?v=glPKhl1z4R0"},
+  {"title":"가슴은 말하리라 - 황진영(A)","url":"https://www.youtube.com/watch?v=RA8wwvQHBp0"},
+  {"title":"가지마오 - 강혜연(Ebm)","url":"https://www.youtube.com/watch?v=IZ5v_dSavhg"},
+  {"title":"간데요 글쎄 - 이태호(Dm)","url":"https://www.youtube.com/watch?v=NHgvlvfaE0Q"},
+  {"title":"갈대의 순정 - 박일남(C)","url":"https://www.youtube.com/watch?v=Dkke428fzyc"},
+  {"title":"갈무리 - 나훈아(Em)","url":"https://www.youtube.com/watch?v=HdsV2Qeq3jo"},
+  {"title":"갈사람 - 유현상(Bbm)","url":"https://www.youtube.com/watch?v=V8AidneGy1A"},
+  {"title":"거짓말 - 조항조(Fm)","url":"https://www.youtube.com/watch?v=tgmeBP20qfY"},
+  {"title":"겁이나 - 남진(Dbm)","url":"https://www.youtube.com/watch?v=ovaz74Cbbno"},
+  {"title":"겨울장미-이은하(Gm)","url":"https://www.youtube.com/watch?v=sa1vvBxm2iY"},
+  {"title":"계룡산 연가 - 차성연(Eb)","url":"https://www.youtube.com/watch?v=DXZrQkrYOUE"},
+  {"title":"계절의 길목에서 - 소리새(Em)","url":"https://www.youtube.com/watch?v=CEKy_z5aftQ"},
+  {"title":"고로해서 - 현진우(Bbm)","url":"https://www.youtube.com/watch?v=jDOtNvT_JGc"},
+  {"title":"고리 - 정동원(Ebm)","url":"https://www.youtube.com/watch?v=7rmxv9S_qC0"},
+  {"title":"고맙소-조항조(G)","url":"https://www.youtube.com/watch?v=Y7iCvtSUlYo"},
+  {"title":"고장난 벽시계 - 나훈아(Ab)","url":"https://www.youtube.com/watch?v=0euwKTejNDc"},
+  {"title":"고창에서 왔어요 - 김현(Dm)","url":"https://www.youtube.com/watch?v=Gh42bWnc9vA"},
+  {"title":"고향 무정-오기택(C)","url":"https://www.youtube.com/watch?v=DwItTYZGSK0"},
+  {"title":"고향가는 길 - 김용임(Gm)","url":"https://www.youtube.com/watch?v=Y_4T8f4SKMM"},
+  {"title":"고향역(Disko) - 나훈아(Gm)","url":"https://www.youtube.com/watch?v=XA2ORoPyEFc"},
+  {"title":"고향저녀-나훈아(Db)","url":"https://www.youtube.com/watch?v=z1WftATW9Xo"},
+  {"title":"고향집 - 양지원(B)","url":"https://www.youtube.com/watch?v=d_KWkbCazuU"},
+  {"title":"골목길 - 신촌 블루스(Fm)","url":"https://www.youtube.com/watch?v=m71rfkNh7e8"},
+  {"title":"공짜 - 강진(Bm)","url":"https://www.youtube.com/watch?v=v56ppCrk2qQ"},
+  {"title":"괜챦아 - 하동진(Em)","url":"https://www.youtube.com/watch?v=ayegFzznOis"},
+  {"title":"괜챦아요 - 이창휘(Am)","url":"https://www.youtube.com/watch?v=hRTonAg4_H8"},
+  {"title":"구름같은 인생 - 이자연(G)","url":"https://www.youtube.com/watch?v=oalpan_uZB0"},
+  {"title":"구름나그네-최헌((F)","url":"https://www.youtube.com/watch?v=U5Ns80_Tgo4"},
+  {"title":"군산항아 - 철희(Bm)","url":"https://www.youtube.com/watch?v=lUtSVKfo3bY"},
+  {"title":"굴레 - 김홍조(Am)","url":"https://www.youtube.com/watch?v=pa8qoHFBwQo"},
+  {"title":"그 사람 - 조용희(F)","url":"https://www.youtube.com/watch?v=fl9TGmLXHxU"},
+  {"title":"그 사람은 모를거야 - 문성아(Gm)","url":"https://www.youtube.com/watch?v=SIKPkeDdgdQ"},
+  {"title":"그 여자가 가는곳은-최진희(Gm)","url":"https://www.youtube.com/watch?v=6fStPvsvfzQ"},
+  {"title":"그 정을 어이해요-주현미(C)","url":"https://www.youtube.com/watch?v=NDZQQMHFIHY"},
+  {"title":"그건너(Disco) - 이장희(Em)","url":"https://www.youtube.com/watch?v=l1Ro_cqxC1Y"},
+  {"title":"그것은 인생-최혜영(Cm)","url":"https://www.youtube.com/watch?v=AuogBGLCALg"},
+  {"title":"그겨울의찻집 - 조용필(Bbm)","url":"https://www.youtube.com/watch?v=6tus-s2MSfo"},
+  {"title":"그깟팔자 - 진성(Am)","url":"https://www.youtube.com/watch?v=E9mTmSpUO-c"},
+  {"title":"그냥 가면 어쩌나-강혜연(Eb)","url":"https://www.youtube.com/watch?v=BfTGQtCMXJs"},
+  {"title":"그냥 가세요 - 나훈아(Gm)","url":"https://www.youtube.com/watch?v=oNESLkXV2Nk"},
+  {"title":"그놈 - 강문경(Ab)","url":"https://www.youtube.com/watch?v=1yHqJvnMwoA"},
+  {"title":"그대 그리고 나 - 소리새(C)","url":"https://www.youtube.com/watch?v=NBcVkh4Qi5I"},
+  {"title":"그대로 그렇게 - 이명훈(Dm)","url":"https://www.youtube.com/watch?v=yl5Bbi_X2fY"},
+  {"title":"그대여 변치마오-남진(Dm)","url":"https://www.youtube.com/watch?v=378JoY-W-1c"},
+  {"title":"그때 그 부산 - 김장수(Am)","url":"https://www.youtube.com/watch?v=yJ43xBvogmc"},
+  {"title":"그때 그 사람 - 심수봉(Bbm)","url":"https://www.youtube.com/watch?v=5gLD0S3yhGc"},
+  {"title":"그러길래 사랑인가봐- 봉은주(G)","url":"https://www.youtube.com/watch?v=ouu65Dh0WPg"},
+  {"title":"그리운 희야-박일남(Dbm)","url":"https://www.youtube.com/watch?v=DUWr1Ebai2c"},
+  {"title":"그리움 찾아 - 어니언스(G)","url":"https://www.youtube.com/watch?v=bsvMsegRxa0"},
+  {"title":"기다리는 아픔 - 조용필(Am)","url":"https://www.youtube.com/watch?v=MC6ub0WvYlY"},
+  {"title":"기러기 아빠-이미자(Em)","url":"https://www.youtube.com/watch?v=gw5xCjVviAI"},
+  {"title":"기장 갈매기 - 나훈아(Fm)","url":"https://www.youtube.com/watch?v=hinPoQ5u6mw"},
+  {"title":"기적소리만 - 배성(Dm)","url":"https://www.youtube.com/watch?v=7uMOxFU_SbI"},
+  {"title":"기타부기-윤일로(D)","url":"https://www.youtube.com/watch?v=dKB-A0sZeGo"},
+  {"title":"길모퉁이 그 찻집 - 신웅(Gm)","url":"https://www.youtube.com/watch?v=BpMStCkSsDY"},
+  {"title":"김밥 - 자두(E)","url":"https://www.youtube.com/watch?v=S6GvhqSE3t4"},
+  {"title":"까치가 울면 -나훈아(Am)","url":"https://www.youtube.com/watch?v=1bQXBs1eO6c"},
+  {"title":"꼬마 청바지 - 김상아(Gm)","url":"https://www.youtube.com/watch?v=9615UNkEj10"},
+  {"title":"꼭필요합니다 - 문주란(Gm)","url":"https://www.youtube.com/watch?v=8iXZW0YYQRY"},
+  {"title":"꽃길 - 정훈희(F)","url":"https://www.youtube.com/watch?v=mbQg3wiKcRA"},
+  {"title":"꿈길 - 김다현(Am)","url":"https://www.youtube.com/watch?v=Dcn5QvgvMcg"},
+  {"title":"꿈에 본 내고향-한정무(Am)","url":"https://www.youtube.com/watch?v=j6pbW5oET1s"},
+  {"title":"꿈에라도 한번 - 나미애(E)","url":"https://www.youtube.com/watch?v=Bm_4YLaWq3o"},
+  {"title":"꿈의대화 - 이범용 & 한명훈(A)","url":"https://www.youtube.com/watch?v=d1ozz8sqDmo"},
+  {"title":"나 어떡해(Disko) - 산울림(Cm)","url":"https://www.youtube.com/watch?v=T4-bZP3KoRA"},
+  {"title":"나 항상 그대를-이선희(F)","url":"https://www.youtube.com/watch?v=3BqZ_18mBo8"},
+  {"title":"나그네 고향-진성(Bb)","url":"https://www.youtube.com/watch?v=BnrOzIErpcs"},
+  {"title":"나는 어떡하라구 - 윤항기(Gm)","url":"https://www.youtube.com/watch?v=VZ4ogoNCPok"},
+  {"title":"나는 행복한 사람 - 이문세(Em)","url":"https://www.youtube.com/watch?v=VXygk3Jkw90"},
+  {"title":"나를 두고 아리랑-김훈(G)","url":"https://www.youtube.com/watch?v=4-8M6xF7iYA"},
+  {"title":"나쁜남자-신유(Bm)","url":"https://www.youtube.com/watch?v=5qMdoQamfzw"},
+  {"title":"낙엽따라 가버린사랑 - 차중락(D)","url":"https://www.youtube.com/watch?v=X4HwHjCBWL0"},
+  {"title":"낙엽이 가는 길 - 나훈아(Dm)","url":"https://www.youtube.com/watch?v=Ok23LUG0GlM"},
+  {"title":"난 정말 몰랐었네 - 최병걸(F)","url":"https://www.youtube.com/watch?v=SeYPg8uU_8w"},
+  {"title":"날 버린 남자-하춘화(D)","url":"https://www.youtube.com/watch?v=oAvT-cbID9U"},
+  {"title":"날이 갈수록-김정호(Am)","url":"https://www.youtube.com/watch?v=KotDWkIrb5I"},
+  {"title":"남자라 울지 못했다 - 박진석(C)","url":"https://www.youtube.com/watch?v=vNc6YHhZO8"},
+  {"title":"남자라는 이유로 - 조항조(Bb)","url":"https://www.youtube.com/watch?v=iGnT2-5AKgY"},
+  {"title":"남자의 눈물 - 현철(F)","url":"https://www.youtube.com/watch?v=VA8x3D4mP3U"},
+  {"title":"남해고속도로 - 신웅(Dm)","url":"https://www.youtube.com/watch?v=VvF-NU6EDfY"},
+  {"title":"남행열차(Disko) -  김수희(Cm)","url":"https://www.youtube.com/watch?v=gay-BfbehvY"},
+  {"title":"낭만에 대하여-최백호(Dm) ","url":"https://www.youtube.com/watch?v=iknPYnHhZtI"},
+  {"title":"내 나이가 어때서 - 오승근(A)","url":"https://www.youtube.com/watch?v=2Sdhw8tboqc"},
+  {"title":"내 사랑 지금 어디-이현(Eb)","url":"https://www.youtube.com/watch?v=1vSJcivM2NY"},
+  {"title":"내 여인 - 진성(A)","url":"https://www.youtube.com/watch?v=AuiIJcJ-BbA"},
+  {"title":"내가 사준 스카프-황진영(C)","url":"https://www.youtube.com/watch?v=GRbaAPdhYcM"},
+  {"title":"내가 왜 웁니까-주현미(Gb)","url":"https://www.youtube.com/watch?v=cCWSjr0_6ao"},
+  {"title":"내가 지켜줄꺼야-이루(Dm)","url":"https://www.youtube.com/watch?v=XJBagTfRvwI"},
+  {"title":"내게도 사랑이 - 함중아(Am/A)","url":"https://www.youtube.com/watch?v=o_VbR6Mtk1E"},
+  {"title":"내마음 갈곳을 잃어-최백호(Fm)","url":"https://www.youtube.com/watch?v=Dgp6QxH2LfU"},
+  {"title":"내마음 별과같이 - 현철(F)","url":"https://www.youtube.com/watch?v=oqwnPzy--pw"},
+  {"title":"너나좋아해 나너좋아해-현이와 덕이(Gm)","url":"https://www.youtube.com/watch?v=cV1soili01s"},
+  {"title":"너무합니다-김수희(Gm)","url":"https://www.youtube.com/watch?v=MDyXelq8Ro8"},
+  {"title":"너와 나의 고향-나훈아(C)","url":"https://www.youtube.com/watch?v=XckU_Xwiojk"},
+  {"title":"노란 샤쓰의 사나이-한명숙(G)","url":"https://www.youtube.com/watch?v=4Aq_iWnRTXc"},
+  {"title":"노을빛 서해대교 -김상배(Dm)","url":"https://www.youtube.com/watch?v=f9WSBLCH9Hk"},
+  {"title":"녹슬은 기찻길-나훈아(Dm)","url":"https://www.youtube.com/watch?v=xDNiJDVjaUo"},
+  {"title":"누가 또 - 정의송(Gbm)","url":"https://www.youtube.com/watch?v=_6bLE1Nv2d0"},
+  {"title":"눈동자-이승재(Bbm)","url":"https://www.youtube.com/watch?v=RLks-G7_SLM"},
+  {"title":"눈물을 감추고-위키리(Bb)","url":"https://www.youtube.com/watch?v=9_p-9YsiRHM"},
+  {"title":"눈물의 부르스-주현미(F)","url":"https://www.youtube.com/watch?v=uvQsq7EucZ8"},
+  {"title":"눈물이 멈추지 않는다-이루(Am)","url":"https://www.youtube.com/watch?v=-CpxIE_GrQE"},
+  {"title":"눈이 내리네 - 김추자(Gbm)","url":"https://www.youtube.com/watch?v=H6Ff1ftaG3U"},
+  {"title":"느티나무야 - 황진영(F)","url":"https://www.youtube.com/watch?v=6ofWfYoaO9U"},
+  {"title":"님과함께-남진(Dm)","url":"https://www.youtube.com/watch?v=1jRKm1XYh2o"},
+  {"title":"님그리워 - 나훈아(Dm)","url":"https://www.youtube.com/watch?v=o1RO39fFMwE"},
+  {"title":"님의 향기-김경남(D)","url":"https://www.youtube.com/watch?v=15yLpwJe9dU"},
+  {"title":"다시 한번  - 현당(F)","url":"https://www.youtube.com/watch?v=OX2PiPuUNcY"},
+  {"title":"다시 한번만 - 설운도(Dbm)","url":"https://www.youtube.com/watch?v=qXgzYvBQMm0"},
+  {"title":"단한번  포옹- 이찬(Am)","url":"https://www.youtube.com/watch?v=Hdo_qTxj6tM"},
+  {"title":"당신- 배호(Cm)","url":"https://www.youtube.com/watch?v=yoEMbavAbQU"},
+  {"title":"당신  -  김정수(Dm)","url":"https://www.youtube.com/watch?v=bL72BgPviDw"},
+  {"title":"당신께만 - 이은하(Cm)","url":"https://www.youtube.com/watch?v=Osnl2Ka5VUU"},
+  {"title":"당신도 울고 있네요-김종찬(Ab)","url":"https://www.youtube.com/watch?v=BfCtAHrQRa8"},
+  {"title":"당신은 내여자 - 송대관(Cm)","url":"https://www.youtube.com/watch?v=0AkGrbzDSYs"},
+  {"title":"당신은 몰라 - 최헌(Dm)","url":"https://www.youtube.com/watch?v=tkND-H4Vuc4"},
+  {"title":"당신은 바보야-이혜리(Gm)","url":"https://www.youtube.com/watch?v=voU7LE6xfm4"},
+  {"title":"당신의 이름 - 공훈(Cm)","url":"https://www.youtube.com/watch?v=WHgRkfgxgvY"},
+  {"title":"당신이어서 - 조항조(Dbm)","url":"https://www.youtube.com/watch?v=3GhieqDrkFU"},
+  {"title":"당신 편-장윤정(B)","url":"https://www.youtube.com/watch?v=syn0HBV-OMs"},
+  {"title":"대구애가-황진영(C)","url":"https://www.youtube.com/watch?v=4odSz0DqHVw"},
+  {"title":"대답없는 너-황진영(Bb)","url":"https://www.youtube.com/watch?v=XOSlDAMvu0A"},
+  {"title":"대동강 편지 - 나훈아(Am)","url":"https://www.youtube.com/watch?v=YEWMjGEuaCM"},
+  {"title":"더하기 곱하기-강문경(C)","url":"https://www.youtube.com/watch?v=2i5U6qzhQAk"},
+  {"title":"돌려줄수 없나요 - 조경수(C)","url":"https://www.youtube.com/watch?v=j3xxcUGekqo"},
+  {"title":"돌아오지 마세요 - 주현미(G)","url":"https://www.youtube.com/watch?v=g14abW_zCrQ"},
+  {"title":"돌아오지 않는 강 - 조용필(Dbm)","url":"https://www.youtube.com/watch?v=SZP6DfohGBw"},
+  {"title":"돌아와요 부산항에(Disco) - 조용필(Fm)","url":"https://www.youtube.com/watch?v=2p7ySLkoQFQ"},
+  {"title":"돌이키지마 - 이은하(Am)","url":"https://www.youtube.com/watch?v=rWT2_wjyNDU"},
+  {"title":"동네방네 뜬 소문 - 봉은주(Am)","url":"https://www.youtube.com/watch?v=4XgePMEr_10"},
+  {"title":"동백 아가씨 - 이미자(Fm)","url":"https://www.youtube.com/watch?v=KlMm4cjlnUA"},
+  {"title":"동숙의 노래-문주란(F)","url":"https://www.youtube.com/watch?v=Y8V07PjV0W0"},
+  {"title":"동작대교 - 박진석(Bm)","url":"https://www.youtube.com/watch?v=ixBJ_QhUPrI"},
+  {"title":"동창생-장락(Dm)","url":"https://www.youtube.com/watch?v=LELW4jgEjhI"},
+  {"title":"두여인 - 태진아(Bbm)","url":"https://www.youtube.com/watch?v=T37FW5bJRJE"},
+  {"title":"둥지 - 남진(Fm)","url":"https://www.youtube.com/watch?v=HgUon6v_Jpw"},
+  {"title":"뒤늦은 후회 - 현이와 덕이(Gbm)","url":"https://www.youtube.com/watch?v=tM6YlCgaMmg"},
+  {"title":"들꽃 - 주병선(Bm)","url":"https://www.youtube.com/watch?v=yDdypJniqu0"},
+  {"title":"들녘길에서 -   신웅(Fm)","url":"https://www.youtube.com/watch?v=dZqp4ygY5lY"},
+  {"title":"딱 백년만 - 김의영(Ab)","url":"https://www.youtube.com/watch?v=PFD77f6bebo"},
+  {"title":"떠날 수 없는 당신 - 김상배(Dm)","url":"https://www.youtube.com/watch?v=SXby9kDQ390"},
+  {"title":"떠났어도 당신이 - 하진수(B)","url":"https://www.youtube.com/watch?v=a0vEytpYLz4"},
+  {"title":"룰루 랄라 - 김상아(Fm)","url":"https://www.youtube.com/watch?v=_TKYUuJCIgM"},
+  {"title":"마산항 - 양지호(Dm)","url":"https://www.youtube.com/watch?v=fhWcjUVjG0w"},
+  {"title":"마산항엔 비가내린다 - 하춘화(G)","url":"https://www.youtube.com/watch?v=VXqfyRai8x4"},
+  {"title":"마음이야 짠하지만 - 황진영(B)","url":"https://www.youtube.com/watch?v=v3b_6uzTVpg"},
+  {"title":"마지막 본 당신 - 배호(Dm)","url":"https://www.youtube.com/watch?v=ew8ROBBYrMg"},
+  {"title":"마지막 사랑 - 임양랑(Em)","url":"https://www.youtube.com/watch?v=Ge7XtlTYjXY"},
+  {"title":"마지막 편지 - 박강수(Cm)","url":"https://www.youtube.com/watch?v=jsw65Qd2-Us"},
+  {"title":"마지막 포옹-김수희(Gm)","url":"https://www.youtube.com/watch?v=odYlsed9srs"},
+  {"title":"만약에 - 조항조(Em)","url":"https://www.youtube.com/watch?v=psP5DSMXP5c"},
+  {"title":"망모 - 나훈아(Bb)","url":"https://www.youtube.com/watch?v=XcJVDk4MmdU"},
+  {"title":"매우 (梅雨)- 나훈아(Em)","url":"https://www.youtube.com/watch?v=42EBtOwrBvk"},
+  {"title":"머나먼 고향-나훈아(F)","url":"https://www.youtube.com/watch?v=GKhIROy3KxI"},
+  {"title":"머물고 싶지만-조경수(Dm)","url":"https://www.youtube.com/watch?v=oGa0gQCnr5o"},
+  {"title":"먹물같은 사랑-김유라(Bm)","url":"https://www.youtube.com/watch?v=UVPlBDCFS-g"},
+  {"title":"멈추지 말아요-무당(A)","url":"https://www.youtube.com/watch?v=tAAiCacmyLk"},
+  {"title":"멍에-김수희(Gm)","url":"https://www.youtube.com/watch?v=S-EY6scW2Ho"},
+  {"title":"메기의 추억-미국민요(G)","url":"https://www.youtube.com/watch?v=gijHWTKzef4"},
+  {"title":"몇미터 앞에다 두고 - 김상배(Bm)","url":"https://www.youtube.com/watch?v=630IutUV9o8"},
+  {"title":"모르나봐-이혜리(Gbm)","url":"https://www.youtube.com/watch?v=y2FDymqYuQ4"},
+  {"title":"모르리 - 남진(F)","url":"https://www.youtube.com/watch?v=5NwcsIeZ-Ko"},
+  {"title":"모를 겁니다 - 조항조(B)","url":"https://www.youtube.com/watch?v=-4TBy3OvPr8"},
+  {"title":"모정의 세월 - 한세일(D)","url":"https://www.youtube.com/watch?v=mlOPhAeSR0Y"},
+  {"title":"목포항 - 조항조(Dbm)","url":"https://www.youtube.com/watch?v=rZdE2dHbZ7o"},
+  {"title":"못맺을 사랑이기에  - 나훈아(Am)","url":"https://www.youtube.com/watch?v=ckfNIq-toOQ"},
+  {"title":"못잊겠어요-김수희(Em)","url":"https://www.youtube.com/watch?v=gwE1-2JUcXc"},
+  {"title":"못잊을 건 정 - 정원(Cm)","url":"https://www.youtube.com/watch?v=3JxnwQaqaO8"},
+  {"title":"무정블루스 - 강승모(Am)","url":"https://www.youtube.com/watch?v=QP-ALcLTkTE"},
+  {"title":"무정한 사람 - 성민호(Em)","url":"https://www.youtube.com/watch?v=m-XXeOGUk4E"},
+  {"title":"무조건 - 박상철(Dm)","url":"https://www.youtube.com/watch?v=FXgWrX7illQ"},
+  {"title":"무효 - 신웅(F)","url":"https://www.youtube.com/watch?v=wIRXlqHviFE"},
+  {"title":"문자라도 하지 그랬소-이애란(G)","url":"https://www.youtube.com/watch?v=e-p0z1R_dVk"},
+  {"title":"물레방아 도는데(Disko) - 나훈아(Am)","url":"https://www.youtube.com/watch?v=dxZHRnyIJoo"},
+  {"title":"뭐야 뭐야 - 방실이(Gm)","url":"https://www.youtube.com/watch?v=97512cHAg5g"},
+  {"title":"미련 - 장현(Am)","url":"https://www.youtube.com/watch?v=RqUlkEGGVl8"},
+  {"title":"미련 때문에(Disko) - 최진희(Fm)","url":"https://www.youtube.com/watch?v=tsySHOtzZoo"},
+  {"title":"미련도 후회도 없다-위키리(A)","url":"https://www.youtube.com/watch?v=IIXlcLN7iGc"},
+  {"title":"미안하오 - 김희재(A)","url":"https://www.youtube.com/watch?v=QWHZ1yAQIYg"},
+  {"title":"미안한 사랑 - 진시몬(Em)","url":"https://www.youtube.com/watch?v=SZStpazjV70"},
+  {"title":"미안해서 미안해서 - 신유(G)","url":"https://www.youtube.com/watch?v=_rUQKjzRzcc"},
+  {"title":"미야 - 김현(Dm)","url":"https://www.youtube.com/watch?v=NXXNTee5EPI"},
+  {"title":"미운사랑 - 진미령(D)","url":"https://www.youtube.com/watch?v=RlOuZTUs_KA"},
+  {"title":"미운정 고운정 - 나미(Dm)","url":"https://www.youtube.com/watch?v=SMwKF3WvtGg"},
+  {"title":"미워도 다시한번-남진(Dm)","url":"https://www.youtube.com/watch?v=_hwtzD4bGy8"},
+  {"title":"미워하지 않으리(Disko) - 정원(C)","url":"https://www.youtube.com/watch?v=7XpbpYj82x0"},
+  {"title":"믿어도 될까요-임희숙(Gm)","url":"https://www.youtube.com/watch?v=n6r5OErtlKE"},
+  {"title":"바람과 구름-장남들(Bm)","url":"https://www.youtube.com/watch?v=ErP7rCpjMm8"},
+  {"title":"바람부는 세상 - 성민호(Eb)","url":"https://www.youtube.com/watch?v=cCJ4o5y2OIs"},
+  {"title":"바램 - 임영웅(Db)","url":"https://www.youtube.com/watch?v=UJ_gsEzgLZM"},
+  {"title":"바보 같은 사람 - 요요미(Ab)","url":"https://www.youtube.com/watch?v=RxvuoR88tqk"},
+  {"title":"바보처럼 울었다 - 진송남(Am)","url":"https://www.youtube.com/watch?v=50P-NVcCc6Y"},
+  {"title":"밤열차 - 김연자(Ab)","url":"https://www.youtube.com/watch?v=WDYoW2DD6fA"},
+  {"title":"밤의 길목에서 - 김세영(Cm)","url":"https://www.youtube.com/watch?v=ubOy60v64b8"},
+  {"title":"밤차로 가지 말아요 - 최유나(Gm)","url":"https://www.youtube.com/watch?v=UgCtCwTNCqE"},
+  {"title":"밤차에 만난사람 - 위키리(Dm)","url":"https://www.youtube.com/watch?v=7TwSwc9lc1k"},
+  {"title":"방랑자-박인희(Am/A)","url":"https://www.youtube.com/watch?v=DzzRLP6aPxA"},
+  {"title":"백세시대 - 이자연(Gm)","url":"https://www.youtube.com/watch?v=zacH2AaiIuw"},
+  {"title":"백세인생 - 이애란(Db)","url":"https://www.youtube.com/watch?v=04QI38uKrrk"},
+  {"title":"버팀목 - 이태호(Abm)","url":"https://www.youtube.com/watch?v=qcGsvRdqAVs"},
+  {"title":"벌 나비 꽃나비-배금성(D)","url":"https://www.youtube.com/watch?v=6Xg2GvyEclk"},
+  {"title":"벌써 잊었나 - 성민호(Bm)","url":"https://www.youtube.com/watch?v=0weUcl6Ykko"},
+  {"title":"벙어리 바이올린 - 윤설하(Am)","url":"https://www.youtube.com/watch?v=f394dn_hqPs"},
+  {"title":"별빛 같은 나의 사랑아-임영웅(Gb)","url":"https://www.youtube.com/watch?v=J9pSUDo1TSk"},
+  {"title":"별아 내 가슴에 - 남진(Em)","url":"https://www.youtube.com/watch?v=PrWJcKRrD8Q"},
+  {"title":"별이 빛나는 밤에 - 윤항기(Dbm)","url":"https://www.youtube.com/watch?v=5pAa_61-4Jo"},
+  {"title":"별이여 사랑이여 - 사랑의 하모니(Am)","url":"https://www.youtube.com/watch?v=tmTTbJPGBFA"},
+  {"title":"보고 있어도 보고싶은 그대-권윤경(Abm","url":"https://www.youtube.com/watch?v=aylokQoSc50"},
+  {"title":"보고싶다 내사랑 - 이병철(Em)","url":"https://www.youtube.com/watch?v=fJgZ4tYdaBg"},
+  {"title":"보고싶다 사랑아 - 정의송(Cm)","url":"https://www.youtube.com/watch?v=dy8e0XPMwNY"},
+  {"title":"보고싶은 마음 - 김정호(Dm)","url":"https://www.youtube.com/watch?v=ah22YFKrn9A"},
+  {"title":"보고싶은 여인 - 현철(Bm)","url":"https://www.youtube.com/watch?v=Po2LS_LFiUA"},
+  {"title":"보약같은 친구 - 진시몬(C)","url":"https://www.youtube.com/watch?v=3fch1F5h_0s"},
+  {"title":"복수초 - 최성민(Db)","url":"https://www.youtube.com/watch?v=aE3NPrpUbYM"},
+  {"title":"봄비 - 이은하(Gm)","url":"https://www.youtube.com/watch?v=m2lGmXtesbU"},
+  {"title":"부르지마 - 김목경(Abm)","url":"https://www.youtube.com/watch?v=gyA04XyN4wE"},
+  {"title":"부모-유주용(Eb)","url":"https://www.youtube.com/watch?v=8sgdCuzzMEY"},
+  {"title":"부산 갈매기(Disco) -  문성재(Bm)","url":"https://www.youtube.com/watch?v=sg9E5TgMILY"},
+  {"title":"불꺼진 창  - 조영남(Em)","url":"https://www.youtube.com/watch?v=CTlHWwvbbG4"},
+  {"title":"붉은입술 - 나훈아(Ab)","url":"https://www.youtube.com/watch?v=3Z8WUJLM40A"},
+  {"title":"비껴간 맹세 - 박우철(D)","url":"https://www.youtube.com/watch?v=HgymTFKqIDw"},
+  {"title":"비내리는 경부선 - 배호(C)","url":"https://www.youtube.com/watch?v=yuVSIqRN-T0"},
+  {"title":"비내리는 영동교-임영웅(C)","url":"https://www.youtube.com/watch?v=V75u0ZbF7Xc"},
+  {"title":"비에 젖은 비둘기-이승연(Bb)","url":"https://www.youtube.com/watch?v=O_fr9QQRV_8"},
+  {"title":"비에 젖은 여인 - 배성(Cm)","url":"https://www.youtube.com/watch?v=-OZ357xAuHc"},
+  {"title":"비와 함께 - 진송남(E)","url":"https://www.youtube.com/watch?v=qQPX0EukYbo"},
+  {"title":"빈잔 - 남진(Gm)","url":"https://www.youtube.com/watch?v=buGN-wTR6DA"},
+  {"title":"빈지게 - 남진(Dbm)","url":"https://www.youtube.com/watch?v=nWB-7hd4M7A"},
+  {"title":"빗소리는 나의 마음 - 나훈아(Cm)","url":"https://www.youtube.com/watch?v=I66ay9FAgIA"},
+  {"title":"빗속에서 누가 우나 - 남진(Dm)","url":"https://www.youtube.com/watch?v=YBIe-f3bUxo"},
+  {"title":"빗속의 여인-펄씨스터즈(Bm)","url":"https://www.youtube.com/watch?v=sJAvwgN9gPY"},
+  {"title":"빙글빙글-나미(D)","url":"https://www.youtube.com/watch?v=6FFr8PhVuMs"},
+  {"title":"뽀뽀 - 남진(C)","url":"https://www.youtube.com/watch?v=_Z7zSif6sI0"},
+  {"title":"사나이 블루스 - 배성(D)","url":"https://www.youtube.com/watch?v=K9zPF7eAl70"},
+  {"title":"사내-나훈아(A)","url":"https://www.youtube.com/watch?v=ooIPx8HnZA8"},
+  {"title":"사는 동안 - 이태호(C)","url":"https://www.youtube.com/watch?v=5u4Z1iORn5I"},
+  {"title":"사랑-나훈아(G)","url":"https://www.youtube.com/watch?v=Ce-J1UpJ0PQ"},
+  {"title":"사랑 반 눈물 반 - 진해성(Dm)","url":"https://www.youtube.com/watch?v=ZR1B8axqW6M"},
+  {"title":"사랑가-송가인(Eb)","url":"https://www.youtube.com/watch?v=GOvD9euzkhQ"},
+  {"title":"사랑과 인생 - 김홍조(Dm)","url":"https://www.youtube.com/watch?v=eVFzXxhaX1c"},
+  {"title":"사랑만은 않겠어요 - 윤수일(Bm)","url":"https://www.youtube.com/watch?v=LCb5r8u9YTw"},
+  {"title":"사랑아 - 강승모(Ebm)","url":"https://www.youtube.com/watch?v=k3c_2vTR2H0"},
+  {"title":"사랑아 다시 한번 - 나훈아(Gm)","url":"https://www.youtube.com/watch?v=fSRnqOLPFJQ"},
+  {"title":"사랑은 고맙고 이별은 미웁고-김성기(Am)","url":"https://www.youtube.com/watch?v=QYGvDer1Nz4"},
+  {"title":"사랑은 나비 인가봐-현철(Db)","url":"https://www.youtube.com/watch?v=SWGOZJUeqOg"},
+  {"title":"사랑은 무슨 얼어 죽을 사랑이야-나훈아(Bm)","url":"https://www.youtube.com/watch?v=5HKpMiumEmY"},
+  {"title":"사랑은 이제그만-민해경(D)","url":"https://www.youtube.com/watch?v=Ar0Qi2cmYLg"},
+  {"title":"사랑을 한번 해보고 싶어요 - 하동진(Dm)","url":"https://www.youtube.com/watch?v=Sj15fUz0Cio"},
+  {"title":"사랑의 진실 - 김정호(Am)","url":"https://www.youtube.com/watch?v=3EyUaH1Icrg"},
+  {"title":"사랑의 팔베개 - 김희진(Bb)","url":"https://www.youtube.com/watch?v=MJQyONHtpDU"},
+  {"title":"사랑이 그리울때 - 나훈아(Dm)","url":"https://www.youtube.com/watch?v=9RjvoZj0tmc"},
+  {"title":"사랑이 남아있을때 (디스코) - 문희옥(Dbm)","url":"https://www.youtube.com/watch?v=y-ch7nKCLW0"},
+  {"title":"사랑이 두개 - 배금성(Db)","url":"https://www.youtube.com/watch?v=bE4YuTqodG0"},
+  {"title":"사랑이 비를 맞아요 - 배금성(Db)","url":"https://www.youtube.com/watch?v=2EQ8diC25bs"},
+  {"title":"사랑이 저만치 가네-김종찬(Dm)","url":"https://www.youtube.com/watch?v=mKT5WhY7cC0"},
+  {"title":"사랑인줄 모르고 - 봉은주(Gm)","url":"https://www.youtube.com/watch?v=WrZ7QH_C2tM"},
+  {"title":"사랑하고 있어요-남진(Dm)","url":"https://www.youtube.com/watch?v=rlwCqLz-0ZE"},
+  {"title":"사랑하는 그대에게 - 박강성(G)","url":"https://www.youtube.com/watch?v=BbWGV6lacco"},
+  {"title":"사랑하는 그대에게 - 유심초(F)","url":"https://www.youtube.com/watch?v=KO0zzxB17_c"},
+  {"title":"사랑하다 싫어지면-김태희(G)","url":"https://www.youtube.com/watch?v=zX1XX5pCdyI"},
+  {"title":"사랑해요 내내-이루(cm)","url":"https://www.youtube.com/watch?v=w5ZOW9kki6c"},
+  {"title":"사랑했어요 - 김상아(Dm)","url":"https://www.youtube.com/watch?v=54H4yie9YPI"},
+  {"title":"사랑헀는데-이미자(Gm)","url":"https://www.youtube.com/watch?v=takymm1ioTM"},
+  {"title":"사모 - 나훈아(Ebm)","url":"https://www.youtube.com/watch?v=19wwpUjrnKQ"},
+  {"title":"사모의 정 - 봉은주(Gm)","url":"https://www.youtube.com/watch?v=GMRGZPjpw8U"},
+  {"title":"사무치는 그리움 - 채희(Ab)","url":"https://www.youtube.com/watch?v=IW6h-hrAj3s"},
+  {"title":"삼각관계-강진(Fm)","url":"https://www.youtube.com/watch?v=Pu6AZu5_WWE"},
+  {"title":"삼백초 - 김상배(Dm)","url":"https://www.youtube.com/watch?v=bpsxXPK0_qI"},
+  {"title":"상아의 노래 - 송창식(Cm)","url":"https://www.youtube.com/watch?v=Wy6iungA6s8"},
+  {"title":"상처 - 조용필(Dbm)","url":"https://www.youtube.com/watch?v=GGlRJO6oIOI"},
+  {"title":"서울 가 살자 - 전유진(Fm)","url":"https://www.youtube.com/watch?v=WjO6N6hyd_c"},
+  {"title":"서울 나그네 - 이자연(Bb)","url":"https://www.youtube.com/watch?v=_Nm81FcGfP0"},
+  {"title":"석양길 나그네 - 김상진(B)","url":"https://www.youtube.com/watch?v=dHeleh_Fteg"},
+  {"title":"세월 열차 - 한소리(Db)","url":"https://www.youtube.com/watch?v=c_vPHo9HfkI"},
+  {"title":"세월아 네가 미워 - 오세근(A)","url":"https://www.youtube.com/watch?v=IRbfMdO18JE"},
+  {"title":"세월에 던진 사랑 - 박우철(Db)","url":"https://www.youtube.com/watch?v=3yNPfxnIbQ8"},
+  {"title":"세월의 장난 - 케빈리(Bbm)","url":"https://www.youtube.com/watch?v=eNH1sk0677k"},
+  {"title":"소양강 처녀-김태희(Gm)","url":"https://www.youtube.com/watch?v=YcsCDxdKy-4"},
+  {"title":"소원 - 김홍조(Em)","url":"https://www.youtube.com/watch?v=BxzuYOBd7Tg"},
+  {"title":"순아-최헌(Dm)","url":"https://www.youtube.com/watch?v=iPq1Bjh1Bm0"},
+  {"title":"슬픈 사랑 - 김상아(Am)","url":"https://www.youtube.com/watch?v=DIfTbLOwjUM"},
+  {"title":"시도때도 없이 - 김홍조(Bbm)","url":"https://www.youtube.com/watch?v=4TYg5mXe_iM"},
+  {"title":"신 나는 하루-조승구(Bm)","url":"https://www.youtube.com/watch?v=T1t1N474Nbk"},
+  {"title":"아득히 먼곳 - 이승재(Cm)","url":"https://www.youtube.com/watch?v=583muTk9Ahk"},
+  {"title":"아미새-현철(F)","url":"https://www.youtube.com/watch?v=5XrZoPdJyuU"},
+  {"title":"아모르파티-김연자(Em)","url":"https://www.youtube.com/watch?v=3td4n0-VcLI"},
+  {"title":"아서라 마서라 - 양용모(A)","url":"https://www.youtube.com/watch?v=8OFZvDBowNA"},
+  {"title":"아슬아슬 - 진시몬(Dbm)","url":"https://www.youtube.com/watch?v=ATAkZM-PkbQ"},
+  {"title":"아직도 못다한 사랑 - 솔개트리오(Em)","url":"https://www.youtube.com/watch?v=fr8Ulfl33yA"},
+  {"title":"아파트(Disco) - 윤수일(Gm)","url":"https://www.youtube.com/watch?v=lDiikHao2Y0"},
+  {"title":"안개속에 가버린 사랑 - 배호(Dm)","url":"https://www.youtube.com/watch?v=Jp4Lyx5Klvg"},
+  {"title":"안개속의 두그림자 - 함중아(Am)","url":"https://www.youtube.com/watch?v=ORDN4Bkyb8c"},
+  {"title":"안녕도 못한 이별-황진영(B)","url":"https://www.youtube.com/watch?v=sL2G0JA8GgM"},
+  {"title":"안동역 앞에서-진성(Cm)","url":"https://www.youtube.com/watch?v=L26jSx5TZns"},
+  {"title":"안돼요 안돼 - 김상배(Ebm)","url":"https://www.youtube.com/watch?v=zFnVHoQTgKs"},
+  {"title":"안오네 - 주현미(Gm)","url":"https://www.youtube.com/watch?v=t69ZrTmWuyA"},
+  {"title":"안올거면서 - 진시몬(Em)","url":"https://www.youtube.com/watch?v=RwdcqpdY41A"},
+  {"title":"애모 - 서울패밀리(Dbm)","url":"https://www.youtube.com/watch?v=K1IBGi_ysvE"},
+  {"title":"애모 -김수희(D)","url":"https://www.youtube.com/watch?v=pe6ku7VavGI"},
+  {"title":"애비 - 장락(D)","url":"https://www.youtube.com/watch?v=JW3R9r3djYM"},
+  {"title":"애원 - 진시몬(Dm)","url":"https://www.youtube.com/watch?v=TFNisqYIhJM"},
+  {"title":"애원 - 황규현(Am)","url":"https://www.youtube.com/watch?v=1k8czxC-k_k"},
+  {"title":"애인 - 태진아(Dbm)","url":"https://www.youtube.com/watch?v=jRmB84nCUCQ"},
+  {"title":"애인에게(그날처럼)-진시몬(Em)","url":"https://www.youtube.com/watch?v=Sh-1uPRwUCU"},
+  {"title":"앵두 - 최헌(Dm)","url":"https://www.youtube.com/watch?v=kA1rdO4lFBQ"},
+  {"title":"얄미운 사람-이찬원(Bbm)","url":"https://www.youtube.com/watch?v=DInTCxzB4m0"},
+  {"title":"어머님-남진(Gm)","url":"https://www.youtube.com/watch?v=ntGjpXazqvU"},
+  {"title":"어제같은 이별 - 주현미(Gb)","url":"https://www.youtube.com/watch?v=AfRq646u9AQ"},
+  {"title":"어쩌실래요 당신-계은숙(Gm)","url":"https://www.youtube.com/watch?v=4gaDJ9rD5Ac"},
+  {"title":"어찌합니까 - 최헌(Dm)","url":"https://www.youtube.com/watch?v=ViFuWoEIhZs"},
+  {"title":"어차피 떠난 사람-한민(Bbm)","url":"https://www.youtube.com/watch?v=BdxayeOt4q4"},
+  {"title":"엄마의 꽃 - 이가야(Dm)","url":"https://www.youtube.com/watch?v=INunuFeoq0c"},
+  {"title":"엔젤리나 - 김상아(F)","url":"https://www.youtube.com/watch?v=9cTjOZTz2_A"},
+  {"title":"엘콘도파사-미국민요(Em)","url":"https://www.youtube.com/watch?v=rbTEUCcmvk4"},
+  {"title":"엘콘도르파사-영상악보(Am)","url":"https://www.youtube.com/watch?v=OtbTCA9qWfo"},
+  {"title":"여고 졸업반 - 김인순(Gm)","url":"https://www.youtube.com/watch?v=JO28vhcoqaU"},
+  {"title":"여고시절 - 이수미(Dm)","url":"https://www.youtube.com/watch?v=RJznHyF0X_Q"},
+  {"title":"여백 - 임영웅(Cm)","url":"https://www.youtube.com/watch?v=b_OPcT-oUDk"},
+  {"title":"여여 - 금잔디(A)","url":"https://www.youtube.com/watch?v=TTB_oMzPJJw"},
+  {"title":"여인 - 소리새(Fm)","url":"https://www.youtube.com/watch?v=QHofeiSZfhc"},
+  {"title":"	여자야 - 유현상(Fm)","url":"https://www.youtube.com/watch?v=CYXKsxaxSWI"},
+  {"title":"여자이니까-심수봉(C)","url":"https://www.youtube.com/watch?v=zizZWMkuIws"},
+  {"title":"여정-최진희(Bbm)","url":"https://www.youtube.com/watch?v=jbxPjIJrElQ"},
+  {"title":"여행을 떠나요 - 조용필(D)","url":"https://www.youtube.com/watch?v=T0EHUhX0f4E"},
+  {"title":"연가-황진영(A)","url":"https://www.youtube.com/watch?v=Zq2U4TT_0o0"},
+  {"title":"연락선 - 정재은(Bbm)","url":"https://www.youtube.com/watch?v=zU8G-TidSmM"},
+  {"title":"연모 - 박우철(A)","url":"https://www.youtube.com/watch?v=OKdmtT8J2gI"},
+  {"title":"연상의 여인-윤민호(Bm)","url":"https://www.youtube.com/watch?v=bFbrkE-0eTc"},
+  {"title":"연인 - 한승기(Fm)","url":"https://www.youtube.com/watch?v=vpYCZGZ2WBE"},
+  {"title":"연정-배금성(D) ","url":"https://www.youtube.com/watch?v=MleuSMnM6_w"},
+  {"title":"열정 - 혜은이(Gm)","url":"https://www.youtube.com/watch?v=U_CemwgXETA"},
+  {"title":"영산포 아가씨-이미자(Fm)","url":"https://www.youtube.com/watch?v=HBUI6-nees4"},
+  {"title":"영시의 이별 - 배호(C)","url":"https://www.youtube.com/watch?v=CdtTKymt9AM"},
+  {"title":"영영-나훈아(F)","url":"https://www.youtube.com/watch?v=AhL58ghJL84"},
+  {"title":"옛날 애인  - 전부성(Bbm)","url":"https://www.youtube.com/watch?v=ZX7Jypm3Yc4"},
+  {"title":"옛시인의 노래-한경애(Bm)","url":"https://www.youtube.com/watch?v=UB7yh_3fib4"},
+  {"title":"오늘은 고백한다 - 배호(Bbm)","url":"https://www.youtube.com/watch?v=2jwOD83XFvI"},
+  {"title":"오늘이 젊은 날 - 김용임(E)","url":"https://www.youtube.com/watch?v=_tXsWaL8ZfE"},
+  {"title":"오동잎 -최헌(Bm)","url":"https://www.youtube.com/watch?v=qeuqqeBmZOA"},
+  {"title":"오랜만이야 - 이찬(Cm)","url":"https://www.youtube.com/watch?v=ZtCophg9jb0"},
+  {"title":"옥경이-태진아(Ebm)","url":"https://www.youtube.com/watch?v=b2ORvXuhOc4"},
+  {"title":"옥이  - 하나로(Dm)","url":"https://www.youtube.com/watch?v=7C_eSKSlp7w"},
+  {"title":"와 - 이정현(Abm)","url":"https://www.youtube.com/watch?v=HfhzhonToJU"},
+  {"title":"왜 돌아보오 - 윤복희(Gm)","url":"https://www.youtube.com/watch?v=EIxgEpteK_I"},
+  {"title":"왜가요 왜가 - 오세근(Dm)","url":"https://www.youtube.com/watch?v=b_LXvGMXX-c"},
+  {"title":"왜불러 - 송창식(Am)","url":"https://www.youtube.com/watch?v=8syKdORQixo"},
+  {"title":"왜왜왜 - 박일준(A)","url":"https://www.youtube.com/watch?v=olgzvV2jWls"},
+  {"title":"용두산 엘레지-고봉산(Bm)","url":"https://www.youtube.com/watch?v=kiwnfFDi0qg"},
+  {"title":"용산마루-황진영(A)","url":"https://www.youtube.com/watch?v=OVzPxvSjoBQ"},
+  {"title":"용산역 광장 - 진성(Gm)","url":"https://www.youtube.com/watch?v=ErUiW3TOvNI"},
+  {"title":"용서 - 박우철(C)","url":"https://www.youtube.com/watch?v=I211eOZgwn4"},
+  {"title":"우수 - 남진(Gm)","url":"https://www.youtube.com/watch?v=shijG72CECM"},
+  {"title":"우연히 만난 여자  - 박진석(A)","url":"https://www.youtube.com/watch?v=-rTGl9jAXik"},
+  {"title":"우연히 정들었네-박우철(Dm)","url":"https://www.youtube.com/watch?v=W_PxLiEK-w8"},
+  {"title":"운명 - 김수희(Dbm)","url":"https://www.youtube.com/watch?v=W5IqYIGqbQg"},
+  {"title":"운명이죠 - 나미애(Gm)","url":"https://www.youtube.com/watch?v=-yZlA4cmQZA"},
+  {"title":"울고싶어 - 배호(Dm)","url":"https://www.youtube.com/watch?v=eYnjtIns3hg"},
+  {"title":"울지도 못합니다 - 나훈아(Dm)","url":"https://www.youtube.com/watch?v=PX28dMyq46M"},
+  {"title":"원하지 않는 이별-남진(Dbm)","url":"https://www.youtube.com/watch?v=yNsqmj3goEU"},
+  {"title":"웬말 인가요 - 나훈아(Cm)","url":"https://www.youtube.com/watch?v=CH0gFd8FcDo"},
+  {"title":"유랑청춘 - 송해(Bbm)","url":"https://www.youtube.com/watch?v=DGTIV7HM98g"},
+  {"title":"유리꽃 - 박정식(Gb)","url":"https://www.youtube.com/watch?v=c78Kce7L-tA"},
+  {"title":"유리벽 사랑 - 박진도(Dm)","url":"https://www.youtube.com/watch?v=VsyISFQat10"},
+  {"title":"육군 김일병-봉봉사중창단(C)","url":"https://www.youtube.com/watch?v=Bd-ZxLjjOMI"},
+  {"title":"을왕리의 추억-오세근(Cm)","url":"https://www.youtube.com/watch?v=ZnQqPRy3KBk"},
+  {"title":"이더라 - 연정(Em)","url":"https://www.youtube.com/watch?v=NfZmx7WFNAU"},
+  {"title":"이력서-남진(Abm)","url":"https://www.youtube.com/watch?v=SqDG7Cb8qsU"},
+  {"title":"이름 모를 소녀 - 김정호(Gbm)","url":"https://www.youtube.com/watch?v=LTHafClWMBg"},
+  {"title":"이마음 누가 압니까 - 정원(Bbm)","url":"https://www.youtube.com/watch?v=azQiiHFkIyU"},
+  {"title":"이별-임영웅(F)","url":"https://www.youtube.com/watch?v=HWXzGDuincE"},
+  {"title":"이별의 끝도 모르고 - 박우철(D)","url":"https://www.youtube.com/watch?v=mzay-C9LrrQ"},
+  {"title":"이별의 종착역-손시향(D)","url":"https://www.youtube.com/watch?v=2spPyYG3Too"},
+  {"title":"이봐요 - 문희옥(Gb)","url":"https://www.youtube.com/watch?v=fTVd_v46cS8"},
+  {"title":"이야 - 린(Am)","url":"https://www.youtube.com/watch?v=Ee_12WHDOWY"},
+  {"title":"이유가 뭘까 - 태진아(Em)","url":"https://www.youtube.com/watch?v=qaazHFHxw8w"},
+  {"title":"인생 - 김성환(G)","url":"https://www.youtube.com/watch?v=ykg1xl-1vNs"},
+  {"title":"인생이란 꿈이 라오-오승근(C)","url":"https://www.youtube.com/watch?v=6eClCT_PWfc"},
+  {"title":"인연 - 하동진(Dm)","url":"https://www.youtube.com/watch?v=cL7IhgyOTGY"},
+  {"title":"인연의 끈 - 황진영(A)","url":"https://www.youtube.com/watch?v=CDxFIDL3yJk"},
+  {"title":"인천 차이나 - 박진석(Am)","url":"https://www.youtube.com/watch?v=S7sdF3DNpRQ"},
+  {"title":"잃어버린 30년 - 설운도(Dm)","url":"https://www.youtube.com/watch?v=dbXooq-o2Vo"},
+  {"title":"잃어버린 정-김수희(Gm)","url":"https://www.youtube.com/watch?v=ty9UhANind4"},
+  {"title":"임그리워 - 나훈아(Dm)","url":"https://www.youtube.com/watch?v=jq3FSAl1k_E"},
+  {"title":"임도울고 나도울고-나훈아(Ebm)","url":"https://www.youtube.com/watch?v=lTB1iv6f2Mc"},
+  {"title":"임진강 - 이태호(Dm)","url":"https://www.youtube.com/watch?v=ReX9ToYLzcE"},
+  {"title":"있을때 잘해야겠어 - 제갈대성(Dm)","url":"https://www.youtube.com/watch?v=HQG6jhbU80Q"},
+  {"title":"잊으리-이승연(C)","url":"https://www.youtube.com/watch?v=Fm3vYKBab7Y"},
+  {"title":"잊을수 없는 사람 - 함중아(Bm)","url":"https://www.youtube.com/watch?v=hUdi1_9YH28"},
+  {"title":"잊혀진 사랑 - 조용필(Dm)","url":"https://www.youtube.com/watch?v=VBao9YtaGJM"},
+  {"title":"잊혀진 여인 - 임희숙(A)","url":"https://www.youtube.com/watch?v=o9rtAtjJuV0"},
+  {"title":"자갈치 아지매 - 이혜리(Gbm)","url":"https://www.youtube.com/watch?v=9M9X76V6AA8"},
+  {"title":"자옥아(Disco) - 박상철(Dm)","url":"https://www.youtube.com/watch?v=9Nr3tSQX9-o"},
+  {"title":"작은새-어니언스(Am)","url":"https://www.youtube.com/watch?v=U8mRpqSak7U"},
+  {"title":"잘 가요 - 박일준(Em)","url":"https://www.youtube.com/watch?v=F9nktGCn7rU"},
+  {"title":"잘난 여자 - 이찬(Dm)","url":"https://www.youtube.com/watch?v=Hkqa49vS-Gg"},
+  {"title":"잘있거라 공항이여 - 진송남(A)","url":"https://www.youtube.com/watch?v=y03kfbz_8_Q"},
+  {"title":"잘해줄껄 - 이찬(Bm)","url":"https://www.youtube.com/watch?v=_ET6GOZp74I"},
+  {"title":"잡초-나훈아(Em)","url":"https://www.youtube.com/watch?v=8WhnHDQiVtg"},
+  {"title":"장미꽃한송이 - 오승근(G)","url":"https://www.youtube.com/watch?v=hqqpZit5f6c"},
+  {"title":"장미빛 스카프(Disco) - 윤항기(Gm)","url":"https://www.youtube.com/watch?v=r2oSAu5Sv1I"},
+  {"title":"저 별과 달을 - 어니언스(G)","url":"https://www.youtube.com/watch?v=b8nkUddirUs"},
+  {"title":"저 하늘 별을 찾아-유지나(D)","url":"https://www.youtube.com/watch?v=R1i2VdIWBYQ"},
+  {"title":"저리가 -남진(Cm)","url":"https://www.youtube.com/watch?v=bmbMtFX0DsY"},
+  {"title":"젊음의 노트 - 유미리(Dm)","url":"https://www.youtube.com/watch?v=FYXZXaqnuN4"},
+  {"title":"점수따고 싶은여자-황진영(A)","url":"https://www.youtube.com/watch?v=0iXrtkIZi0E"},
+  {"title":"정 - 조용필(Bbm)","url":"https://www.youtube.com/watch?v=E-S5EbHf448"},
+  {"title":"정 주고 떠난 사람 - 현철(A)","url":"https://www.youtube.com/watch?v=MmzTwgvf4Fk"},
+  {"title":"정녕 - 조항조(C)","url":"https://www.youtube.com/watch?v=NYX3XbTRb5I"},
+  {"title":"정답게 가는 길 - 박우철(Gb)","url":"https://www.youtube.com/watch?v=vlw4al6FDH0"},
+  {"title":"정들지 말자 - 오세근(Cm)","url":"https://www.youtube.com/watch?v=Zap-HPTTVko"},
+  {"title":"정때문에 - 송대관(Dm)","url":"https://www.youtube.com/watch?v=PLqfe_MpdAg"},
+  {"title":"정에 울고 님에 울고 - 하춘화(Am)","url":"https://www.youtube.com/watch?v=8ZQW2mzkDxw"},
+  {"title":"정주고 가지마오 - 봉은주(Gm)","url":"https://www.youtube.com/watch?v=w5z0zHpzd8s"},
+  {"title":"정주고 간 여인 - 이태호(Bb)","url":"https://www.youtube.com/watch?v=FuKlvyNUJjg"},
+  {"title":"정주고 내가 우네-트리퍼스(Dm)","url":"https://www.youtube.com/watch?v=UHseGXHPAoI"},
+  {"title":"제비처럼-윤승희(Bb)","url":"https://www.youtube.com/watch?v=1RSHFoR2zuc"},
+  {"title":"조용한 미소- 이은하(Bm)","url":"https://www.youtube.com/watch?v=FtrqMEU-2cc"},
+  {"title":"조용한 이별 - 함중아(Ebm)","url":"https://www.youtube.com/watch?v=1vmOuhN-NUI"},
+  {"title":"좋은 사람 만나요 - 김신우(Ebm)","url":"https://www.youtube.com/watch?v=gwCEhYUStRg"},
+  {"title":"죄많은 여인 - 신웅(Bm)","url":"https://www.youtube.com/watch?v=ENWbNBsesDQ"},
+  {"title":"준비된 이별 - 나훈아(Bbm)","url":"https://www.youtube.com/watch?v=BDMNBvT4Nm4"},
+  {"title":"지나간다고 - 송가인(Eb)","url":"https://www.youtube.com/watch?v=j9KTZ4Mn2n4"},
+  {"title":"지나야 - 박서진(Gb)","url":"https://www.youtube.com/watch?v=_XVCSgW-wKg"},
+  {"title":"지름길 - 금잔디(Bm)","url":"https://www.youtube.com/watch?v=bFWz9njDzLQ"},
+  {"title":"진정인가요 - 김연자(Gm)","url":"https://www.youtube.com/watch?v=oG7Y8lcRmqs"},
+  {"title":"짝사랑-주현미(E)","url":"https://www.youtube.com/watch?v=UcgtygpKvXg"},
+  {"title":"짝사랑-손인호(Dm)","url":"https://www.youtube.com/watch?v=S5ysKlH4ttk"},
+  {"title":"차라리 꿈이라면  - 한정호(Dbm)","url":"https://www.youtube.com/watch?v=XwxuBJkuh80"},
+  {"title":"찰랑찰랑(Disco)  - 이자연(D)","url":"https://www.youtube.com/watch?v=h6G6r9AnNlk"},
+  {"title":"참 좋다-나현재(C)","url":"https://www.youtube.com/watch?v=IbiAGunjBEw"},
+  {"title":"참 좋은 사람 - 김홍조(Bm)","url":"https://www.youtube.com/watch?v=J_nk2KQ33ZA"},
+  {"title":"찻잔의 이별 - 윤수일,최진희(Dm)","url":"https://www.youtube.com/watch?v=WvjyYDDGF9w"},
+  {"title":"찻집의 고독  - 나훈아(Em)","url":"https://www.youtube.com/watch?v=0ttRVwAKulg"},
+  {"title":"창가에 -김남훈(Am)","url":"https://www.youtube.com/watch?v=G_hqsdt5L3w"},
+  {"title":"채석강-진성(Dm)","url":"https://www.youtube.com/watch?v=iSfZniW085U"},
+  {"title":"책상 위에 뚝 뚝 뚝 - 이태호(Dm)","url":"https://www.youtube.com/watch?v=ybeq4geJZyc"},
+  {"title":"처녀 뱃사공-금과은(G)","url":"https://www.youtube.com/watch?v=IXTMVcMCgRU"},
+  {"title":"천년을 빌려준다면 - 박진석(Am)","url":"https://www.youtube.com/watch?v=ErJmLl7fXuc"},
+  {"title":"천년지기 - 유진표(Db)","url":"https://www.youtube.com/watch?v=Z3LGBbXy4vY"},
+  {"title":"천년화 - 최석준(Cm)","url":"https://www.youtube.com/watch?v=ETTunq6hkss"},
+  {"title":"천리먼길 - 박우철(C)","url":"https://www.youtube.com/watch?v=jX34DcXnrlQ"},
+  {"title":"천상재회 - 최진희(Bm)","url":"https://www.youtube.com/watch?v=LECENsuWDBQ"},
+  {"title":"천상화 - 조항조(Dm)","url":"https://www.youtube.com/watch?v=bMPbKP3Ir8k"},
+  {"title":"철없던 사랑-홍수철(Dm)","url":"https://www.youtube.com/watch?v=Cspj4jm_WPY"},
+  {"title":"첫 차 - 방실이(Gm)","url":"https://www.youtube.com/watch?v=dDPgfIHOrik"},
+  {"title":"청춘 -김창완(Cm)","url":"https://www.youtube.com/watch?v=thnJ6bHjYzA"},
+  {"title":"청춘 - 박우철(Bb)","url":"https://www.youtube.com/watch?v=wYoBWmXzp-E"},
+  {"title":"청춘이여 - 정원(Fm)","url":"https://www.youtube.com/watch?v=6lECwnuObUQ"},
+  {"title":"체온 - 김홍조(Dm)","url":"https://www.youtube.com/watch?v=ehcNj8U6XI8"},
+  {"title":"초가삼간-최정자(D)","url":"https://www.youtube.com/watch?v=f5HejmBsebw"},
+  {"title":"촛불 - 정태춘(Em)","url":"https://www.youtube.com/watch?v=sdZvybdR_DY"},
+  {"title":"최고친구 - 소명,김정호(C)","url":"https://www.youtube.com/watch?v=gnGI2dnUROk"},
+  {"title":"최선 - 김민국(Bb)","url":"https://www.youtube.com/watch?v=-oJCQoHVOtM"},
+  {"title":"최진사댁 셋째딸-이은하(Am)","url":"https://www.youtube.com/watch?v=WUAGqanI54w"},
+  {"title":"추억 - 허송(Bbm)","url":"https://www.youtube.com/watch?v=718Uf1dv2ug"},
+  {"title":"추억의 그림자 - 박일남(Cm)","url":"https://www.youtube.com/watch?v=J2gTdY8phsk"},
+  {"title":"추억의 대관령 - 나훈아(Bb)","url":"https://www.youtube.com/watch?v=q7EdRqg5AEA"},
+  {"title":"추억의 소야곡-정동원(Em) ","url":"https://www.youtube.com/watch?v=3rUeMQzO1zU"},
+  {"title":"춤 추는 밤-이혜리(F)","url":"https://www.youtube.com/watch?v=S5BqojVJPTg"},
+  {"title":"충청도 아줌마 -오기택(D)","url":"https://www.youtube.com/watch?v=KovZLICi9pU"},
+  {"title":"칠갑산 - 주병선(Fm)","url":"https://www.youtube.com/watch?v=P7rTxSFiC2Y"},
+  {"title":"카멜레온 - 박영규(Bb)","url":"https://www.youtube.com/watch?v=JK1i2jTToNw"},
+  {"title":"카스바의여인 - 윤희상(Dm)","url":"https://www.youtube.com/watch?v=P5NeIFmwCp8"},
+  {"title":"코리언 마도로스 - 황진영(B)","url":"https://www.youtube.com/watch?v=gQCTEK7QtqU"},
+  {"title":"코스모스 피어있는 길 - 김상희(Am)","url":"https://www.youtube.com/watch?v=LEPSxNiUke0"},
+  {"title":"킬리만자로의 표범 - 조용필(Gm)","url":"https://www.youtube.com/watch?v=W52LhDXGTkE"},
+  {"title":"태클을 걸지마-진성(Fm)","url":"https://www.youtube.com/watch?v=CzbbvlVPVzY"},
+  {"title":"터미널 - 윤수일(B)","url":"https://www.youtube.com/watch?v=XnyywDOceDc"},
+  {"title":"테스형! - 나훈아(Am)","url":"https://www.youtube.com/watch?v=M-wTPaTwIKY"},
+  {"title":"토요일은 밤이 좋아-김종찬(Am)","url":"https://www.youtube.com/watch?v=t6Szxl4J0Sc"},
+  {"title":"톡톡튀는 여자 - 김홍조(Am)","url":"https://www.youtube.com/watch?v=_WLKC-T2cRg"},
+  {"title":"통영에 가자 - 김홍조(Dm)","url":"https://www.youtube.com/watch?v=otMgB0uV1yw"},
+  {"title":"트위스트박 - 박일준(Dbm)","url":"https://www.youtube.com/watch?v=Qn7qY-xfy2o"},
+  {"title":"파란 낙엽 - 문주란(Bb)","url":"https://www.youtube.com/watch?v=K4oLP4aOWQc"},
+  {"title":"파란 낙엽 - 배호(A)","url":"https://www.youtube.com/watch?v=Z4Abq0a-49E"},
+  {"title":"팔자 - 강문경(Dm)","url":"https://www.youtube.com/watch?v=WTZojoIzK9I"},
+  {"title":"편지 - 어니언스(G)","url":"https://www.youtube.com/watch?v=rOpxXhdR_QM"},
+  {"title":"평양 아줌마 - 나훈아(F)","url":"https://www.youtube.com/watch?v=fml3ReSWXsM"},
+  {"title":"평행선-문희옥(Dbm)","url":"https://www.youtube.com/watch?v=LFXIJcnh4tE"},
+  {"title":"푸른시절 - 김만수(Am)","url":"https://www.youtube.com/watch?v=kDwG9peO2Qs"},
+  {"title":"피차(간이역) - 나훈아(E)","url":"https://www.youtube.com/watch?v=AUXzYQ0DoEc"},
+  {"title":"핑계 - 설운도(Dm)","url":"https://www.youtube.com/watch?v=IRvzNlaZxYw"},
+  {"title":"하늘 땅 만큼 - 문희옥(Gbm)","url":"https://www.youtube.com/watch?v=erN6ebkF3y0"},
+  {"title":"하숙생-최희준(Eb)","url":"https://www.youtube.com/watch?v=VYxbm_jByHQ"},
+  {"title":"하얀나비-김정호(Ab)","url":"https://www.youtube.com/watch?v=lAqE1tH7KOs"},
+  {"title":"하얀사랑 - 오세근(Em)","url":"https://www.youtube.com/watch?v=z-Sd6HxbR4I"},
+  {"title":"하얀원피스 - 최동길(Cm)","url":"https://www.youtube.com/watch?v=T4l6yaevNWY"},
+  {"title":"한 많은 대동강-송가인(Am)","url":"https://www.youtube.com/watch?v=DoVXJMCqEUE"},
+  {"title":"한남자의여자 - 서주경(F)","url":"https://www.youtube.com/watch?v=g0eX1cZoDQs"},
+  {"title":"한동안 - 김상진(D)","url":"https://www.youtube.com/watch?v=WBlJu181360"},
+  {"title":"한번만 - 동후(Em)","url":"https://www.youtube.com/watch?v=L3aDX8kwELs"},
+  {"title":"한번만-이만영(Dm)","url":"https://www.youtube.com/watch?v=RnimZJ9EiJk"},
+  {"title":"한번만-이향남(C)","url":"https://www.youtube.com/watch?v=XpWFoXMtfJo"},
+  {"title":"한번쯤 - 송창식(Dm)","url":"https://www.youtube.com/watch?v=EUElirZd-jU"},
+  {"title":"한순간 - 이은하(Cm)","url":"https://www.youtube.com/watch?v=AcSzAplwPaM"},
+  {"title":"한잔의 추억(Disco) - 이장희(Em)","url":"https://www.youtube.com/watch?v=71moJjj6CMo"},
+  {"title":"할미꽃 사연 - 송봉수(C)","url":"https://www.youtube.com/watch?v=0egD_--iX6c"},
+  {"title":"해바라기 꽃 - 전미경(G)","url":"https://www.youtube.com/watch?v=s1z00b_AGU0"},
+  {"title":"해변의 여인 - 나훈아(C)","url":"https://www.youtube.com/watch?v=MhPFGRuvZVE"},
+  {"title":"해운대 엘레지 - 손인호(Dm)","url":"https://www.youtube.com/watch?v=rHz7PkOPMzc"},
+  {"title":"해운대연가 - 전철(Em)","url":"https://www.youtube.com/watch?v=rc6XXXPw-9A"},
+  {"title":"행복이란-조경수(Gb)","url":"https://www.youtube.com/watch?v=aSQQfQMdOmA"},
+  {"title":"허무한 마음 - 정원(Cm)","url":"https://www.youtube.com/watch?v=bJm55MHZZ78"},
+  {"title":"헤어져도 사랑만은 - 나훈아(Fm)","url":"https://www.youtube.com/watch?v=AcxBPdm5p9A"},
+  {"title":"헤어진 군산항 - 박진석(Dbm)","url":"https://www.youtube.com/watch?v=Ca8D58KBOdE"},
+  {"title":"혼자사는 남자-이향남(Bb)","url":"https://www.youtube.com/watch?v=W9JGFMYDRRY"},
+  {"title":"혼자사는 여인 - 봉은주(F)","url":"https://www.youtube.com/watch?v=pIG73240ARA"},
+  {"title":"홀로된 사랑 - 장민호(Am)","url":"https://www.youtube.com/watch?v=m_5iEUU6A5g"},
+  {"title":"홍도야 울지마라-김영춘(Bb)","url":"https://www.youtube.com/watch?v=MWWT6Kw2QVE"},
+  {"title":"환희 - 정수라(Em)","url":"https://www.youtube.com/watch?v=APQb_7qu_jU"},
+  {"title":"황제를 위하여 - 홍수철(Fm)","url":"https://www.youtube.com/watch?v=9efDmRPXmo8"},
+  {"title":"황포돛대 - 이미자(D)","url":"https://www.youtube.com/watch?v=8MixYxlDXaY"},
+  {"title":"황홀한 고백 - 윤수일(Dbm)","url":"https://www.youtube.com/watch?v=eLCY_LVsHJw"},
+  {"title":"후회-이용(F)","url":"https://www.youtube.com/watch?v=F4slnbaK3pQ"},
+  {"title":"후회 - 나훈아(Dm)","url":"https://www.youtube.com/watch?v=jUPrlkFe1tE"},
+  {"title":"흔적-최유나(Gm)","url":"https://www.youtube.com/watch?v=aeOLdWnLZ4Y"},
+  {"title":"흰 구름 가는 길-나훈아(C)","url":"https://www.youtube.com/watch?v=fuSWVWnd1-M"},
+  {"title":"흰구름 - 나훈아(Cm)","url":"https://www.youtube.com/watch?v=8LglTdo6lvk"},
+  {"title":"","url":"https://www.youtube.com/watch?v="}
+];
+
+let filtered = items.slice();
+
+/* ----------------------------
+     즐겨찾기 저장
+----------------------------- */
+let favorites = JSON.parse(localStorage.getItem("favorites") || "[]");
+function saveFavorite(url){
+  if(!favorites.includes(url)) favorites.push(url);
+  localStorage.setItem("favorites", JSON.stringify(favorites));
+}
+function removeFavorite(url){
+  favorites = favorites.filter(u => u !== url);
+  localStorage.setItem("favorites", JSON.stringify(favorites));
+}
+function isFavorite(url){
+  return favorites.includes(url);
+}
+
+/* ----------------------------
+    재생 횟수 기록
+----------------------------- */
+let playCounts = JSON.parse(localStorage.getItem("playCounts") || "{}");
+
+function addPlayCount(url){
+  if(!playCounts[url]) playCounts[url] = 0;
+  playCounts[url]++;
+  localStorage.setItem("playCounts", JSON.stringify(playCounts));
+}
+
+function getPlayCount(url){
+  return playCounts[url] || 0;
+}
+
+/* ----------------------------
+    유튜브 썸네일
+----------------------------- */
+function getYoutubeId(url){
+  const m = url.match(/v=([^&]+)/) || url.match(/youtu\.be\/([^?]+)/);
+  return m ? m[1] : "";
+}
+
+async function getBestThumbnail(videoId){
+  const types = ["maxresdefault","sddefault","hqdefault","mqdefault","0"];
+  for(const t of types){
+    const url = `https://img.youtube.com/vi/${videoId}/${t}.jpg`;
+    try{
+      const r = await fetch(url,{method:"HEAD"});
+      if(r.ok) return url;
+    }catch(e){}
+  }
+  return `https://img.youtube.com/vi/${videoId}/0.jpg`;
+}
+
+/* ----------------------------
+    리스트 렌더링
+----------------------------- */
+async function renderList(){
+  listEl.innerHTML = '';
+
+  for(let i=0;i<filtered.length;i++){
+    const it = filtered[i];
+    const videoId = getYoutubeId(it.url);
+
+    const div = document.createElement("div");
+    div.className = "item";
+
+    /* ⭐ 즐겨찾기 */
+    const fav = document.createElement("div");
+    fav.className = "favorite-btn";
+    fav.innerHTML = "⭐";
+    if(isFavorite(it.url)) fav.classList.add("active");
+    fav.onclick = ()=>{
+      if(isFavorite(it.url)){
+        removeFavorite(it.url);
+        fav.classList.remove("active");
+      } else {
+        saveFavorite(it.url);
+        fav.classList.add("active");
+      }
+      document.getElementById("favCount").textContent = favorites.length;
+    };
+    div.appendChild(fav);
+
+    /* 썸네일 */
+    const thumb = document.createElement("div");
+    thumb.className = "thumb-box";
+
+    const img = document.createElement("img");
+    img.src = await getBestThumbnail(videoId);
+
+    img.onclick = ()=> {
+      addPlayCount(it.url);
+      renderList();
+      window.open(it.url, "_blank");
+    };
+
+    const playIcon = document.createElement("div");
+    playIcon.className = "play-icon";
+    playIcon.innerHTML = "▶";
+
+    thumb.appendChild(img);
+    thumb.appendChild(playIcon);
+    div.appendChild(thumb);
+
+    /* 제목 */
+    const t = document.createElement("div");
+    t.className = "song-title";
+    t.textContent = it.title;
+    div.appendChild(t);
+
+    /* 재생 횟수 */
+    const playInfo = document.createElement("div");
+    playInfo.style.fontSize = "12px";
+    playInfo.style.color = "#666";
+    playInfo.textContent = `재생: ${getPlayCount(it.url)}회`;
+    div.appendChild(playInfo);
+
+    /* 버튼 + 체크 */
+    const btns = document.createElement("div");
+
+    const p = document.createElement("button");
+    p.textContent = "재생";
+    p.onclick = ()=>{
+      addPlayCount(it.url);
+      renderList();
+      window.open(it.url, "_blank");
+    };
+
+    const chk = document.createElement("input");
+    chk.type = "checkbox";
+    chk.dataset.idx = i;
+
+    btns.appendChild(p);
+    btns.appendChild(chk);
+
+    div.appendChild(btns);
+    listEl.appendChild(div);
+  }
+
+  totalEl.textContent = items.length;
+  countEl.textContent = filtered.length;
+  document.getElementById("favCount").textContent = favorites.length;
+}
+
+/* ----------------------------
+    필터링
+----------------------------- */
+function applyFilter(q){
+  const k = q.trim().toLowerCase();
+  filtered = !k ? items.slice() : items.filter(it => it.title.toLowerCase().includes(k));
+  renderList();
+}
+qEl.addEventListener("keydown", e=>{
+  if(e.key==="Enter") applyFilter(qEl.value);
+});
+
+/* 즐겨찾기만 보기 */
+document.getElementById("showFav").onclick = ()=>{
+  filtered = items.filter(it => isFavorite(it.url));
+  renderList();
+};
+
+/* 전체보기 */
+document.getElementById("showAll").onclick = ()=>{
+  filtered = items.slice();
+  renderList();
+};
+
+/* 랜덤 재생 */
+document.getElementById("rand").onclick = ()=>{
+  if(filtered.length===0) return alert("조건에 맞는 곡이 없습니다.");
+  const it = filtered[Math.floor(Math.random()*filtered.length)];
+  addPlayCount(it.url);
+  renderList();
+  window.open(it.url,"_blank");
+};
+
+/* 선택 재생 */
+document.getElementById("playAll").onclick = ()=>{
+  const checks = [...document.querySelectorAll("input[type=checkbox]")].filter(c=>c.checked);
+
+  if(checks.length===0){
+    if(!confirm("선택된 항목이 없습니다. 필터된 모든 곡을 재생할까요?")) return;
+    filtered.forEach(it=>{
+      addPlayCount(it.url);
+      window.open(it.url,"_blank");
+    });
+    renderList();
+    return;
+  }
+
+  checks.forEach(c=>{
+    const it = filtered[c.dataset.idx];
+    if(it){
+      addPlayCount(it.url);
+      window.open(it.url,"_blank");
+    }
+  });
+  renderList();
+};
+
+renderList();
+</script>
+
+<script>
+/* === Enhancement: Real-time Search + Highlight === */
+(function(){
+  const qEl = document.querySelector('input[type="text"]');
+  if(!qEl) return;
+
+  let searchTimer=null;
+  const origRender = window.render;
+
+  function highlight(text, keywords){
+    if(!keywords.length) return text;
+    let result=text;
+    keywords.forEach(k=>{
+      const reg=new RegExp('('+k+')','gi');
+      result=result.replace(reg,'<mark>$1</mark>');
+    });
+    return result;
+  }
+
+  window.render = function(list){
+    origRender(list);
+    const keywords=qEl.value.trim().split(/\s+/).filter(Boolean);
+    document.querySelectorAll('.title').forEach(el=>{
+      el.innerHTML = highlight(el.textContent, keywords);
+    });
+  };
+
+  qEl.addEventListener('input',()=>{
+    clearTimeout(searchTimer);
+    searchTimer=setTimeout(()=>{
+      if(window.applyFilter) window.applyFilter();
+    },300);
+  });
+})();
+
+/* === Enhancement: Smart Random === */
+(function(){
+  const randBtn=document.getElementById('rand');
+  if(!randBtn) return;
+
+  let recentPlays=JSON.parse(localStorage.getItem('recentPlays')||'[]');
+
+  function getSmartRandomItem(list){
+    const recentSet=new Set(recentPlays.slice(0,5));
+    const pool=list.flatMap(item=>{
+      if(recentSet.has(item.url)) return [];
+      const w=item.fav?3:1;
+      return Array(w).fill(item);
+    });
+    if(!pool.length) return null;
+    return pool[Math.floor(Math.random()*pool.length)];
+  }
+
+  randBtn.onclick=()=>{
+    const base=(window.filteredItems&&window.filteredItems.length)?window.filteredItems:window.items;
+    const item=getSmartRandomItem(base);
+    if(!item) return;
+    window.playItem(item);
+    recentPlays.unshift(item.url);
+    recentPlays=[...new Set(recentPlays)].slice(0,10);
+    localStorage.setItem('recentPlays',JSON.stringify(recentPlays));
+  };
+})();
+
+/* ==========================
+   필터링된 곡 전체 선택
+========================== */
+/* ==========================
+   필터링된 곡 전체선택 / 해제 (토글)
+========================== */
+let allSelected = false;
+
+document.getElementById("selectAll").onclick = () => {
+  const checks = document.querySelectorAll('input[type="checkbox"]');
+  if (checks.length === 0) return;
+
+  allSelected = !allSelected;
+  checks.forEach(chk => chk.checked = allSelected);
+
+  document.getElementById("selectAll").textContent = allSelected ? "전체해제" : "전체선택";
+};
+
+/* ==========================
+   필터 랜덤 재생
+========================== */
+document.getElementById("randFiltered").onclick = () => {
+  if (filtered.length === 0) {
+    alert("조건에 맞는 곡이 없습니다.");
+    return;
+  }
+  const it = filtered[Math.floor(Math.random() * filtered.length)];
+  addPlayCount(it.url);
+  renderList();
+  window.open(it.url, "_blank");
+};
+
+/* ==========================
+   필터 순차 재생
+========================== */
+let seqIndex = 0;
+document.getElementById("seqFiltered").onclick = () => {
+  if (filtered.length === 0) {
+    alert("조건에 맞는 곡이 없습니다.");
+    return;
+  }
+  if (seqIndex >= filtered.length) seqIndex = 0;
+  const it = filtered[seqIndex];
+  addPlayCount(it.url);
+  window.open(it.url, "_blank");
+  seqIndex++;
+  renderList();
+};
+
+
+/* ==========================
+   필터링된 곡만 재생 (유튜브 플레이리스트 방식)
+========================== */
+function getVideoId(url){
+  const m = url.match(/v=([^&]+)/) || url.match(/youtu\.be\/([^?]+)/);
+  return m ? m[1] : null;
+}
+
+function playFilteredAsPlaylist(shuffle=false){
+  if(filtered.length===0){
+    alert("조건에 맞는 곡이 없습니다.");
+    return;
+  }
+
+  let list = filtered
+    .map(it => getVideoId(it.url))
+    .filter(Boolean);
+
+  if(shuffle){
+    for(let i=list.length-1;i>0;i--){
+      const j=Math.floor(Math.random()*(i+1));
+      [list[i],list[j]]=[list[j],list[i]];
+    }
+  }
+
+  const first = list.shift();
+  const url =
+    "https://www.youtube.com/watch_videos?video_ids=" +
+    [first, ...list].join(",");
+
+  window.open(url, "_blank");
+
+  filtered.forEach(it => addPlayCount(it.url));
+  renderList();
+}
+
+/* 버튼 재정의 */
+document.getElementById("randFiltered").onclick = () => {
+  playFilteredAsPlaylist(true);
+};
+
+document.getElementById("seqFiltered").onclick = () => {
+  playFilteredAsPlaylist(false);
+};
+
+</script>
+
+</body>
+</html>
